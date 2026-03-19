@@ -158,6 +158,35 @@ function parseEspnEvent(event, homeTeamName, awayTeamName) {
   return result;
 }
 
+// ── Fetch pre-game odds from ESPN core API (works for completed/live games) ─
+// Provider 100 = DraftKings; spread is from home team perspective (negative = home favored)
+const CORE_BASE = {
+  mens:   'mens-college-basketball',
+  womens: 'womens-college-basketball',
+};
+
+async function fetchCoreOdds(eventId, gender = 'mens') {
+  const league = CORE_BASE[gender] ?? CORE_BASE.mens;
+  const url = `https://sports.core.api.espn.com/v2/sports/basketball/leagues/${league}/events/${eventId}/competitions/${eventId}/odds`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const item = (data.items ?? []).find(i => i.provider?.id === '100') ?? data.items?.[0];
+    if (!item) return null;
+    return {
+      spread:       item.spread       ?? null,  // home team line, negative = home favored
+      overUnder:    item.overUnder    ?? null,
+      overOdds:     item.overOdds     ?? null,
+      underOdds:    item.underOdds    ?? null,
+      homeMoneyLine: item.homeTeamOdds?.moneyLine ?? null,
+      awayMoneyLine: item.awayTeamOdds?.moneyLine ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 // ── Main: fetch odds for a set of bracket games ────────────────
 // Fetches today + next 6 days in parallel to cover the current round
 // Returns: { [gameId]: { dk: { moneyline, spread, total } } }
@@ -228,6 +257,7 @@ export async function fetchOddsForGames(bracketGames, gender = 'mens') {
 
       if (homeTeamBracket && awayTeamBracket) {
         const result = parseEspnEvent(event, homeTeamBracket, awayTeamBracket);
+        result.startTime = event.date ?? competition.date ?? null;
 
         const statusType  = competition.status?.type ?? {};
         const isCompleted = statusType.completed === true;
@@ -254,6 +284,7 @@ export async function fetchOddsForGames(bracketGames, gender = 'mens') {
           };
         }
 
+        result.espnEventId = event.id;
         oddsMap[bracketGame.id] = result;
         console.log(
           `[sportsbookApi] matched: "${top}" vs "${bot}"`,
@@ -261,6 +292,43 @@ export async function fetchOddsForGames(bracketGames, gender = 'mens') {
         );
         break;
       }
+    }
+  }
+
+  // For live/completed games ESPN scoreboard returns empty odds.
+  // Fetch pre-game closing lines from the core API which retains them permanently.
+  const needsCoreOdds = Object.entries(oddsMap).filter(([, d]) => {
+    const started = d.completedWinner || d.liveData;
+    const hasDk   = d.dk?.total?.line != null || Object.keys(d.dk?.spread ?? {}).length > 0;
+    return started && !hasDk && d.espnEventId;
+  });
+
+  if (needsCoreOdds.length) {
+    console.log('[sportsbookApi] fetching core odds for', needsCoreOdds.length, 'live/completed game(s)');
+    const coreResults = await Promise.all(
+      needsCoreOdds.map(([id, d]) =>
+        fetchCoreOdds(d.espnEventId, gender).then(core => ({ id, d, core }))
+      )
+    );
+    for (const { id, d, core } of coreResults) {
+      if (!core) continue;
+      // Reconstruct dk spread keyed by bracket team name.
+      // Recover team names from scores (completed) or liveData.scores (live).
+      const scoreTeams = Object.keys(d.scores ?? d.liveData?.scores ?? {});
+      const homeTeam   = scoreTeams[0] ?? null;
+      const awayTeam   = scoreTeams[1] ?? null;
+      const dk = { moneyline: {}, spread: {}, total: null };
+      if (core.overUnder != null) {
+        dk.total = { line: core.overUnder, overOdds: core.overOdds, underOdds: core.underOdds };
+      }
+      if (core.spread != null && homeTeam && awayTeam) {
+        dk.spread[homeTeam] = { line: core.spread,         odds: null };
+        dk.spread[awayTeam] = { line: -core.spread,        odds: null };
+      }
+      if (core.homeMoneyLine != null && homeTeam) dk.moneyline[homeTeam] = core.homeMoneyLine;
+      if (core.awayMoneyLine != null && awayTeam) dk.moneyline[awayTeam] = core.awayMoneyLine;
+      oddsMap[id] = { ...d, dk };
+      console.log(`[sportsbookApi] core odds applied for event ${d.espnEventId}: total=${core.overUnder}, spread=${core.spread}`);
     }
   }
 

@@ -32,9 +32,26 @@ export function useSportsbookOdds(games, gender = 'mens') {
     setLoading(true);
     setError(null);
     try {
+      const prevCache = loadCached(gender);
       const odds = await fetchOddsForGames(games, gender);
-      setOddsMap(odds);
-      saveCached(gender, odds);
+      // For completed games where ESPN no longer returns book odds,
+      // preserve the pre-game closing lines from cache so model vs. book
+      // comparisons (over/under, spread bet) still work.
+      const merged = { ...odds };
+      // ESPN drops odds once a game goes live or completes.
+      // Restore the pre-game lines from cache so model vs. book analysis works.
+      for (const [id, newData] of Object.entries(merged)) {
+        const gameStarted = newData.completedWinner || newData.liveData;
+        if (gameStarted) {
+          const hasOdds = newData.dk?.total?.line != null
+            || Object.keys(newData.dk?.spread ?? {}).length > 0;
+          if (!hasOdds && prevCache[id]?.dk) {
+            merged[id] = { ...newData, dk: prevCache[id].dk };
+          }
+        }
+      }
+      setOddsMap(merged);
+      saveCached(gender, merged);
     } catch (e) {
       setError(e.message);
     } finally {

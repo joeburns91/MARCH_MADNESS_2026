@@ -149,6 +149,13 @@ function abbr(name) {
   return name.replace(/\s+/g, '').slice(0, 3).toUpperCase();
 }
 
+function fmtTime(isoStr) {
+  if (!isoStr) return null;
+  const d = new Date(isoStr);
+  if (isNaN(d)) return null;
+  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York', timeZoneName: 'short' });
+}
+
 function WinBadge({ team, prob }) {
   const pct = Math.round(prob * 100);
   return (
@@ -275,8 +282,9 @@ export default function PredictionsTable({ games, predictedRounds, resolveTeams,
           return valueBet.side !== (topLine < 0 ? 'top' : 'bot');
         })();
         const favoriteCover = rawFavCover && !favCoverContradictsValueBet;
-        const consensusTeam = getConsensusDisagreement(mp);
-        return { game: g, round, mp, topName, botName, valueBet, favoriteCover, consensusTeam };
+        const startTime = oddsMap?.[g.id]?.startTime ?? null;
+        const liveData  = oddsMap?.[g.id]?.liveData  ?? null;
+        return { game: g, round, mp, topName, botName, valueBet, favoriteCover, startTime, liveData };
       })
       .filter(Boolean);
   }
@@ -303,11 +311,18 @@ export default function PredictionsTable({ games, predictedRounds, resolveTeams,
       return parseFloat(b.valueBet.avgCushion) - parseFloat(a.valueBet.avgCushion);
     });
 
+  const byTime = (a, b) => {
+    if (!a.startTime && !b.startTime) return 0;
+    if (!a.startTime) return 1;
+    if (!b.startTime) return -1;
+    return new Date(a.startTime) - new Date(b.startTime);
+  };
+
   // Current round rows without value bets (they appear above already)
   const valueBetIds = new Set(allValueBets.map(r => r.game.id));
   const rows = [
-    ...allValueBets,
-    ...currentRows.filter(r => !valueBetIds.has(r.game.id)),
+    ...allValueBets.slice().sort(byTime),
+    ...currentRows.filter(r => !valueBetIds.has(r.game.id)).sort(byTime),
   ];
 
   const hasAnyOdds = Object.keys(oddsMap ?? {}).length > 0;
@@ -320,7 +335,7 @@ export default function PredictionsTable({ games, predictedRounds, resolveTeams,
     });
   }
 
-  function renderGameRow({ game, round, mp, topName, botName, valueBet, favoriteCover, consensusTeam }) {
+  function renderGameRow({ game, round, mp, topName, botName, valueBet, favoriteCover, startTime, liveData }) {
     const gameOdds = oddsMap?.[game.id]?.dk ?? null;
     const checked  = selectedIds.has(game.id);
 
@@ -363,20 +378,18 @@ export default function PredictionsTable({ games, predictedRounds, resolveTeams,
           />
         </td>
         <td className="pt-matchup">
-          <span className="pt-team">
-            {topName}
-            {consensusTeam === topName && (
-              <span className="pt-consensus-star" title="4 models disagree with Balanced Rounds">⭐</span>
-            )}
-          </span>
+          <span className="pt-team">{topName}</span>
           <span className="pt-vs"> vs </span>
-          <span className="pt-team">
-            {botName}
-            {consensusTeam === botName && (
-              <span className="pt-consensus-star" title="4 models disagree with Balanced Rounds">⭐</span>
-            )}
-          </span>
+          <span className="pt-team">{botName}</span>
           {game.region && <span className="pt-region">{game.region}</span>}
+          {liveData ? (
+            <span className="pt-live-score">
+              🔴 {Object.entries(liveData.scores ?? {}).map(([t, s]) => `${abbr(t)} ${s}`).join(' · ')}
+              {liveData.statusText && <span className="pt-live-clock"> · {liveData.statusText}</span>}
+            </span>
+          ) : (
+            fmtTime(startTime) && <span className="pt-gametime">{fmtTime(startTime)}</span>
+          )}
           {round !== displayRound && game.round !== 'playin' && (
             <span className="pt-round-badge">{ROUND_LABELS[round] ?? round}</span>
           )}
