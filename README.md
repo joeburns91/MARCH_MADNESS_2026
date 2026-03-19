@@ -8,11 +8,12 @@ A machine learning pipeline for predicting NCAA March Madness tournament outcome
 
 This project uses XGBoost models trained on 40+ years of NCAA game data to predict tournament game outcomes. It produces win probabilities, point spreads, and totals for all possible team matchups and simulates the full bracket round-by-round.
 
-Four model pipelines are implemented and evaluated:
-- **With Seeds** — XGBoost classifier + regressors, 164 features including seed information
-- **No Seeds** — Same architecture with seed features removed; quantifies seed impact (~10 pp)
-- **Per-Round** — 18 models (win/spread/total × 6 rounds), trained on round-specific historical data
-- **Kaggle** — LOSO XGBoost with ELO + GLM quality features, spline-calibrated win probabilities
+Five model pipelines are implemented and evaluated:
+- **With Seeds** (`seeded`) — XGBoost classifier + regressors, 164 features including seed information
+- **No Seeds** (`noSeed`) — Same architecture with seed features removed; quantifies seed impact (~10 pp)
+- **Balanced Rounds** (`balanced_rounds`) — Per-round models with upset up-weighting; best holdout win accuracy (96.3% on known matchups)
+- **Unbalanced Rounds** (`unbalanced_rounds`) — Per-round models without upset weighting; reflects natural outcome distribution
+- **Kaggle** (`kaggle`) — LOSO XGBoost with ELO + GLM quality features, spline-calibrated win probabilities
 
 **2026 Results (best model — Kaggle pipeline):**
 - Win prediction accuracy on 2024–2025 test data: **80.04%**
@@ -50,13 +51,14 @@ MARCH_MADNESS_2026/
 │   ├── src/
 │   │   ├── App.jsx
 │   │   ├── components/
-│   │   │   ├── BracketView.jsx         # Visual bracket
-│   │   │   ├── PredictionsTable.jsx    # All 4 model predictions + live DraftKings odds
-│   │   │   ├── ModelSummary.jsx        # Model performance metrics (bottom of page)
-│   │   │   ├── GameCard.jsx
-│   │   │   ├── SidePanel.jsx
+│   │   │   ├── BracketView.jsx         # Visual bracket (regions + Final Four + play-in)
+│   │   │   ├── GameCard.jsx            # Single game card (live scores, final results, predictions)
 │   │   │   ├── TournamentView.jsx      # Root view, wires bracket + odds + predictions
-│   │   │   └── BetslipModal.jsx
+│   │   │   ├── PredictionsTable.jsx    # All 5 model predictions + live DraftKings odds + value bets
+│   │   │   ├── BracketPickerModal.jsx  # Modal for picking bracket winners in builder mode
+│   │   │   ├── BetslipModal.jsx        # Betslip builder modal
+│   │   │   ├── ModelPerformanceModal.jsx # Per-round accuracy breakdown modal
+│   │   │   └── ModelSummary.jsx        # Model performance metrics (bottom of page)
 │   │   ├── data/
 │   │   │   ├── bracketData.js          # Static bracket structure
 │   │   │   ├── modelPredictions.json   # Predictions keyed by game ID (known matchups)
@@ -113,7 +115,8 @@ Full per-round breakdown: run `model_evaluation.ipynb`.
 |---|---|---|---|---|
 | **Kaggle** | **80.04%** | 8.26 pts † | 10.79 pts † | LOSO XGBoost + spline calibration, ELO + GLM quality (29 features) |
 | **With Seeds** | 73.51% | 10.07 pts | 14.16 pts | XGBClassifier + regressors, 164 features, seed info included |
-| **Per-Round** | 71.83% | 9.87 pts | 14.05 pts | 18 models: win/spread/total × 6 rounds; round-specific training |
+| **Balanced Rounds** | 71.83% | 9.87 pts | 14.05 pts | 18 models: win/spread/total × 6 rounds; upset up-weighted |
+| **Unbalanced Rounds** | — | — | — | Same architecture, no upset weighting; natural outcome distribution |
 | **No Seeds** | 63.06% | 11.32 pts | 14.16 pts | Same as With Seeds but seed features removed; seeds worth ~10 pp |
 
 † Kaggle spread/total regressors were trained on all historical data including 2024–2025 — these figures are in-sample and optimistically biased.
@@ -191,18 +194,26 @@ Two bracket simulation notebooks run via **Snowflake ML / Snowpark**, reading da
 
 ## React App — Live Bracket Tracker (`march-madness-tracker/`)
 
-A Vite + React 18 app for tracking the tournament in real time alongside model predictions.
+A Vite + React 18 app for tracking the tournament in real time alongside model predictions. Deployed on Vercel from `joe_branch`.
 
 **Features:**
 - Visual bracket for both Men's and Women's tournaments (tab switcher)
-- Fetches live game results and odds from the **ESPN public API** — covers today + next 6 days, across all tournament rounds
-- Auto-fills winners for completed games based on ESPN final scores
-- **Predictions table** showing all 4 model pipelines side-by-side (With Seeds, No Seeds, Per-Round, Kaggle) for the current round — win pick + win probability, predicted spread, and predicted total
+- **Play-in / First Four support** — dedicated play-in section above the bracket; winners auto-propagate into R64 matchups
+- Fetches live game results and odds from the **ESPN public API** — covers 3 days back through 6 days forward to capture play-in games and upcoming rounds
+- **Live game scores** — in-progress games show current scores with a pulsing red dot and clock/half info (e.g. "2nd - 5:30", "Halftime")
+- **Completed game results** — finished games show final scores and winner in the bracket; completed games are automatically removed from the predictions table
+- Auto-fills bracket with winners from ESPN final scores; cascades downstream selections when a pick changes
+- **Bracket Builder mode** — click any game card to pick a winner via a modal; supports printing the filled bracket (landscape, print-optimized CSS)
+- **Predictions table** showing all 5 model pipelines side-by-side (With Seeds, No Seeds, Balanced Rounds, Unbalanced Rounds, Kaggle + Ensemble) for the current round — win pick + win probability, predicted spread, and predicted total
   - Predictions are looked up dynamically from `allMatchupPredictions.json` by team names + round, so any matchup determined by live bracket progression is instantly covered
   - Per-Round predictions use the round-specific model (R64 through Championship)
   - Column headers show each model's test-set accuracy (Win Acc / Spd MAE / Total MAE)
+- **Value bet detection** — highlights games where 3/5+ models diverge from the book line by ≥5 pts, with vote count and average cushion shown
+- **Favorite cover indicator** — flags games where 3/5+ models predict the book favorite covers by ≥5 pts (suppressed when it contradicts the value bet direction)
+- **Consensus disagreement indicator** — ⭐ shown next to a team when all 4 other models disagree with Balanced Rounds
 - **Live DraftKings odds** shown alongside model predictions — moneyline, spread, and over/under
 - **Betslip builder** — check any games to generate a printable betslip comparing model picks to DK lines
+- **Model Performance modal** — per-round accuracy breakdown accessible from the predictions table header
 - **Model Summary** at the bottom of the page with full pipeline accuracy table and per-round breakdown
 
 **Running the app:**
