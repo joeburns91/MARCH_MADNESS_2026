@@ -50,6 +50,14 @@ export function useSportsbookOdds(games, gender = 'mens') {
           }
         }
       }
+      // ESPN eventually drops completed games from the scoreboard entirely.
+      // Preserve completedWinner (and closing odds) from cache for any game
+      // that ESPN no longer returns so they stay filtered out of the table.
+      for (const [id, cachedData] of Object.entries(prevCache)) {
+        if (cachedData.completedWinner && !merged[id]) {
+          merged[id] = cachedData;
+        }
+      }
       setOddsMap(merged);
       saveCached(gender, merged);
     } catch (e) {

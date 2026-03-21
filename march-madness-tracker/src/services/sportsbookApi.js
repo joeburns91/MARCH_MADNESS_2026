@@ -194,9 +194,9 @@ export async function fetchOddsForGames(bracketGames, gender = 'mens') {
   // Build date strings for 3 days back through next 6 days
   // Play-in games start 2 days before R64, so we need to look back
   const today = new Date();
-  const dates = Array.from({ length: 10 }, (_, i) => {
+  const dates = Array.from({ length: 14 }, (_, i) => {
     const d = new Date(today);
-    d.setDate(d.getDate() + i - 3);
+    d.setDate(d.getDate() + i - 7);
     return d.toISOString().slice(0, 10).replace(/-/g, '');
   });
 
