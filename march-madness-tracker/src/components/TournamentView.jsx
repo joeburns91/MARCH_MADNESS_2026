@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useBracketState } from '../hooks/useBracketState';
 import { useSportsbookOdds } from '../hooks/useSportsbookOdds';
 import BracketView from './BracketView';
@@ -8,7 +8,19 @@ import BracketPickerModal from './BracketPickerModal';
 
 export default function TournamentView({ gender }) {
   const state = useBracketState(gender);
-  const { oddsMap, loading: oddsLoading, error: oddsError, refresh: refreshOdds } = useSportsbookOdds(state.games, gender);
+
+  // For odds fetching, substitute resolved team names so that R32+ games
+  // match ESPN events by actual winners rather than originally-seeded teams.
+  const resolvedGames = useMemo(() =>
+    state.games.map(game => {
+      const { topTeam, botTeam } = state.resolveTeams(game);
+      if (topTeam && botTeam) return { ...game, topTeam, botTeam };
+      return game;
+    }),
+    [state.games, state.resolveTeams]
+  );
+
+  const { oddsMap, loading: oddsLoading, error: oddsError, refresh: refreshOdds } = useSportsbookOdds(resolvedGames, gender);
 
   const [builderMode, setBuilderMode]       = useState(false);
   const [confirmedGames, setConfirmedGames] = useState(new Set());

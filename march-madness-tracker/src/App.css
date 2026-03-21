@@ -923,7 +923,7 @@ body {
 
 .predictions-table-wrap {
   overflow-x: auto;
-  padding-bottom: 8px;
+  padding-bottom: 16px;
 }
 
 .predictions-table {
