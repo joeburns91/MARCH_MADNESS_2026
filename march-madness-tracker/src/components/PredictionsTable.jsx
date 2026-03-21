@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import allMatchupPredictions from '../data/allMatchupPredictions.json';
 import BetslipModal from './BetslipModal';
 import ModelPerformanceModal from './ModelPerformanceModal';
@@ -239,13 +239,6 @@ export default function PredictionsTable({ games, predictedRounds, resolveTeams,
   const [valueBetsOnly, setValueBetsOnly] = useState(false);
   const [favCoverOnly, setFavCoverOnly] = useState(false);
 
-  let displayRound = null;
-  for (let i = ROUND_ORDER.length - 1; i >= 0; i--) {
-    const r = ROUND_ORDER[i];
-    if (predictedRounds.has(r) && r !== 'playin') { displayRound = r; break; }
-  }
-  if (!displayRound) return null;
-
   const prefix = gender === 'womens' ? 'w' : 'm';
 
   // Build rows for a given round (roundIdx needed for per-round models)
@@ -289,18 +282,37 @@ export default function PredictionsTable({ games, predictedRounds, resolveTeams,
       .filter(Boolean);
   }
 
-  // Play-in rows shown as a separate section above the main round
-  const playinRows = predictedRounds.has('playin') ? buildRows('playin') : [];
+  // Play-in rows: show as soon as both teams are set for any play-in game
+  const playinRows = buildRows('playin');
 
-  // Current round rows (full list for main table body)
-  const currentRows = buildRows(displayRound);
-  if (!currentRows.length && !playinRows.length) return null;
+  // Build rows for every non-playin round independently — a game appears as soon
+  // as both its opponents are resolved, regardless of other games in the round.
+  const activeRoundKeys = ROUND_ORDER.filter(r => r !== 'playin');
+  const roundRowMap = {};
+  for (const r of activeRoundKeys) {
+    const rRows = buildRows(r);
+    if (rRows.length) roundRowMap[r] = rRows;
+  }
 
-  // Value bets from ALL predicted rounds (deduplicated by game id)
-  const allPredictedRounds = ROUND_ORDER.filter(r => predictedRounds.has(r) && r !== 'playin');
+  if (!playinRows.length && !Object.keys(roundRowMap).length) return null;
+
+  // displayRound = latest round that has any showable games (used for the section title)
+  let displayRound = null;
+  for (let i = ROUND_ORDER.length - 1; i >= 0; i--) {
+    if (roundRowMap[ROUND_ORDER[i]]) { displayRound = ROUND_ORDER[i]; break; }
+  }
+
+  const byTime = (a, b) => {
+    if (!a.startTime && !b.startTime) return 0;
+    if (!a.startTime) return 1;
+    if (!b.startTime) return -1;
+    return new Date(a.startTime) - new Date(b.startTime);
+  };
+
+  // Value bets float to the top — collected from all active rounds, deduplicated
   const seenIds = new Set();
-  const allValueBets = allPredictedRounds
-    .flatMap(r => r === displayRound ? currentRows : buildRows(r))
+  const allValueBets = activeRoundKeys
+    .flatMap(r => roundRowMap[r] ?? [])
     .filter(row => {
       if (!row.valueBet || seenIds.has(row.game.id)) return false;
       seenIds.add(row.game.id);
@@ -311,19 +323,16 @@ export default function PredictionsTable({ games, predictedRounds, resolveTeams,
       return parseFloat(b.valueBet.avgCushion) - parseFloat(a.valueBet.avgCushion);
     });
 
-  const byTime = (a, b) => {
-    if (!a.startTime && !b.startTime) return 0;
-    if (!a.startTime) return 1;
-    if (!b.startTime) return -1;
-    return new Date(a.startTime) - new Date(b.startTime);
-  };
-
-  // Current round rows without value bets (they appear above already)
   const valueBetIds = new Set(allValueBets.map(r => r.game.id));
-  const rows = [
-    ...allValueBets.slice().sort(byTime),
-    ...currentRows.filter(r => !valueBetIds.has(r.game.id)).sort(byTime),
-  ];
+
+  // Non-value-bet rows grouped by round for rendering
+  const multipleRounds = Object.keys(roundRowMap).length > 1;
+  const roundRowsForDisplay = activeRoundKeys
+    .filter(r => roundRowMap[r])
+    .map(r => ({
+      round: r,
+      rows: roundRowMap[r].filter(row => !valueBetIds.has(row.game.id)).sort(byTime),
+    }));
 
   const hasAnyOdds = Object.keys(oddsMap ?? {}).length > 0;
 
@@ -428,7 +437,12 @@ export default function PredictionsTable({ games, predictedRounds, resolveTeams,
     );
   }
 
-  const betslipItems = [...playinRows, ...rows]
+  const allDisplayRows = [
+    ...allValueBets.slice().sort(byTime),
+    ...roundRowsForDisplay.flatMap(({ rows: rRows }) => rRows),
+  ];
+
+  const betslipItems = [...playinRows, ...allDisplayRows]
     .filter(({ game }) => selectedIds.has(game.id))
     .map(({ game, topName, botName, mp }) => ({
       id:        game.id,
@@ -541,17 +555,28 @@ export default function PredictionsTable({ games, predictedRounds, resolveTeams,
                 {playinRows
                   .filter(r => (!valueBetsOnly || r.valueBet) && (!favCoverOnly || r.favoriteCover))
                   .map(row => renderGameRow(row))}
-                {currentRows.length > 0 && (
-                  <tr className="pt-section-divider">
-                    <td colSpan={29} className="pt-section-divider-cell">{ROUND_LABELS[displayRound]}</td>
-                  </tr>
-                )}
               </>
             )}
-            {/* ── Main round rows ── */}
-            {rows
+            {/* ── Value bets (float to top across all rounds) ── */}
+            {allValueBets
               .filter(r => (!valueBetsOnly || r.valueBet) && (!favCoverOnly || r.favoriteCover))
+              .sort(byTime)
               .map(row => renderGameRow(row))}
+            {/* ── Remaining rows grouped by round ── */}
+            {roundRowsForDisplay.map(({ round, rows: rRows }) => {
+              const filtered = rRows.filter(r => (!valueBetsOnly || r.valueBet) && (!favCoverOnly || r.favoriteCover));
+              if (!filtered.length) return null;
+              return (
+                <React.Fragment key={round}>
+                  {multipleRounds && (
+                    <tr className="pt-section-divider">
+                      <td colSpan={29} className="pt-section-divider-cell">{ROUND_LABELS[round]}</td>
+                    </tr>
+                  )}
+                  {filtered.map(row => renderGameRow(row))}
+                </React.Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>

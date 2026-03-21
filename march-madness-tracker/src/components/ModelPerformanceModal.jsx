@@ -134,6 +134,7 @@ export default function ModelPerformanceModal({ games, oddsMap, gender, onClose 
         topName, botName,
         round:       g.round,
         winner:      result.completedWinner,
+        startTime:   result.startTime ?? null,
         actualSpread,
         actualTotal,
         bookTotal,
@@ -144,7 +145,13 @@ export default function ModelPerformanceModal({ games, oddsMap, gender, onClose 
         valueBet,
       };
     })
-    .filter(Boolean);
+    .filter(Boolean)
+    .sort((a, b) => {
+      if (!a.startTime && !b.startTime) return 0;
+      if (!a.startTime) return 1;
+      if (!b.startTime) return -1;
+      return new Date(a.startTime) - new Date(b.startTime);
+    });
 
   // Debug: log completed games data to help diagnose missing spread/total analysis
   if (completedGames.length > 0) {
@@ -246,7 +253,14 @@ export default function ModelPerformanceModal({ games, oddsMap, gender, onClose 
 
                       return (
                         <tr key={i} className={game.valueBet ? 'mp-row-vb' : ''}>
-                          <td className="mp-round">{ROUND_LABELS[game.round] ?? game.round}</td>
+                          <td className="mp-round">
+                            {ROUND_LABELS[game.round] ?? game.round}
+                            {game.startTime && (
+                              <div className="mp-game-date">
+                                {new Date(game.startTime).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                              </div>
+                            )}
+                          </td>
                           <td className="mp-matchup">
                             {game.topName} vs {game.botName}
                             {game.valueBet && (

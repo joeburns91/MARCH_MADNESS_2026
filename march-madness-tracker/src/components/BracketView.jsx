@@ -1,6 +1,28 @@
 import GameCard from './GameCard';
 import { getGamesByRound, getGamesByRegion } from '../data/bracketData';
 import { ROUND_LABELS } from '../hooks/useBracketState';
+import allMatchupPredictions from '../data/allMatchupPredictions.json';
+
+const ROUND_INT = { playin: 0, r64: 1, r32: 2, s16: 3, e8: 4, ff: 5, championship: 6 };
+
+// Derive a GameCard-compatible prediction summary from allMatchupPredictions.
+// Uses balanced_rounds as the primary model; falls back to any available model.
+function derivePrediction(topTeam, botTeam, game, prefix) {
+  const topName = topTeam.name.replace(/\*$/, '');
+  const botName = botTeam.name.replace(/\*$/, '');
+  const [a, b] = [topName, botName].sort();
+  const entry = allMatchupPredictions[`${prefix}:${a}|${b}`];
+  if (!entry) return null;
+  const roundIdx = ROUND_INT[game.round] ?? 1;
+  const pred = entry.balanced_rounds?.[String(roundIdx)]
+    ?? entry.unbalanced_rounds?.[String(roundIdx)]
+    ?? entry.seeded
+    ?? entry.noSeed
+    ?? entry.kaggle
+    ?? null;
+  if (!pred?.predWinner) return null;
+  return { winner: pred.predWinner, spreadRaw: pred.spread ?? null, total: pred.total ?? null };
+}
 
 const REGION_LABELS = {
   W: 'East', X: 'South', Y: 'Midwest', Z: 'West',
@@ -45,7 +67,7 @@ function liveDataFor(game, oddsMap) {
   return oddsMap?.[game.id]?.liveData ?? null;
 }
 
-function RegionBracket({ region, games, selections, predictedRounds, resolveTeams, builderMode, onGameClick, oddsMap }) {
+function RegionBracket({ region, games, selections, predictedRounds, resolveTeams, builderMode, onGameClick, oddsMap, prefix }) {
   const rounds = ['r64','r32','s16','e8'];
   const roundGames = {};
   rounds.forEach((r) => {
@@ -54,7 +76,10 @@ function RegionBracket({ region, games, selections, predictedRounds, resolveTeam
 
   function renderCard(game) {
     const { topTeam, botTeam } = resolveTeams(game);
-    const prediction = predictedRounds.has(game.round) ? game.prediction : null;
+    const teamsKnown = !!topTeam && !!botTeam;
+    const prediction = teamsKnown
+      ? (derivePrediction(topTeam, botTeam, game, prefix) ?? (predictedRounds.has(game.round) ? game.prediction : null))
+      : null;
     return (
       <GameCard
         key={game.id}
@@ -89,8 +114,9 @@ function RegionBracket({ region, games, selections, predictedRounds, resolveTeam
 }
 
 export default function BracketView({
-  games, selections, predictedRounds, resolveTeams, builderMode, onGameClick, oddsMap,
+  games, selections, predictedRounds, resolveTeams, builderMode, onGameClick, oddsMap, gender,
 }) {
+  const prefix = gender === 'womens' ? 'w' : 'm';
   const playinGames = getGamesByRound(games, 'playin');
   const ffGames = getGamesByRound(games, 'ff');
   const champGames = getGamesByRound(games, 'championship');
@@ -99,7 +125,10 @@ export default function BracketView({
 
   function renderCard(game) {
     const { topTeam, botTeam } = resolveTeams(game);
-    const prediction = predictedRounds.has(game.round) ? game.prediction : null;
+    const teamsKnown = !!topTeam && !!botTeam;
+    const prediction = teamsKnown
+      ? (derivePrediction(topTeam, botTeam, game, prefix) ?? (predictedRounds.has(game.round) ? game.prediction : null))
+      : null;
     return (
       <GameCard
         key={game.id}
@@ -139,8 +168,8 @@ export default function BracketView({
       {/* Main bracket */}
       <div className="main-bracket">
         <div className="bracket-side bracket-left">
-          <RegionBracket region="W" games={games} selections={selections} predictedRounds={predictedRounds} resolveTeams={resolveTeams} builderMode={builderMode} onGameClick={onGameClick} oddsMap={oddsMap} />
-          <RegionBracket region="X" games={games} selections={selections} predictedRounds={predictedRounds} resolveTeams={resolveTeams} builderMode={builderMode} onGameClick={onGameClick} oddsMap={oddsMap} />
+          <RegionBracket region="W" games={games} selections={selections} predictedRounds={predictedRounds} resolveTeams={resolveTeams} builderMode={builderMode} onGameClick={onGameClick} oddsMap={oddsMap} prefix={prefix} />
+          <RegionBracket region="X" games={games} selections={selections} predictedRounds={predictedRounds} resolveTeams={resolveTeams} builderMode={builderMode} onGameClick={onGameClick} oddsMap={oddsMap} prefix={prefix} />
         </div>
 
         <div className="bracket-center">
@@ -162,8 +191,8 @@ export default function BracketView({
         </div>
 
         <div className="bracket-side bracket-right">
-          <RegionBracket region="Y" games={games} selections={selections} predictedRounds={predictedRounds} resolveTeams={resolveTeams} builderMode={builderMode} onGameClick={onGameClick} oddsMap={oddsMap} />
-          <RegionBracket region="Z" games={games} selections={selections} predictedRounds={predictedRounds} resolveTeams={resolveTeams} builderMode={builderMode} onGameClick={onGameClick} oddsMap={oddsMap} />
+          <RegionBracket region="Y" games={games} selections={selections} predictedRounds={predictedRounds} resolveTeams={resolveTeams} builderMode={builderMode} onGameClick={onGameClick} oddsMap={oddsMap} prefix={prefix} />
+          <RegionBracket region="Z" games={games} selections={selections} predictedRounds={predictedRounds} resolveTeams={resolveTeams} builderMode={builderMode} onGameClick={onGameClick} oddsMap={oddsMap} prefix={prefix} />
         </div>
       </div>
     </div>

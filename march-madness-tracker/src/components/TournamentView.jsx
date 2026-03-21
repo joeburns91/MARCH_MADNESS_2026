@@ -155,6 +155,7 @@ export default function TournamentView({ gender }) {
           builderMode={builderMode}
           onGameClick={handleGameClick}
           oddsMap={oddsMap}
+          gender={gender}
         />
         <PredictionsTable
           games={state.games}
